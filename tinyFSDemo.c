@@ -10,71 +10,103 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h> 
 
 #include "libTinyFS.h"
 #include "libDisk.h"
 #include "TinyFS_errno.h"
+
+#define RED     "\033[1;31m"
+#define GREEN   "\033[1;32m"
+#define YELLOW  "\033[1;33m"
+#define BLUE    "\033[1;34m"
+#define MAGENTA "\033[1;35m"
+#define CYAN    "\033[1;36m"
+#define RESET   "\033[0m"
+
+
+void printHeader() {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    printf(CYAN "==========================================================================================\n" RESET);
+    printf(CYAN" _    _       _                            _ __  __       _                      \n");
+    printf(CYAN"| |  | |     (_)                          | |  \\/  |     | |                     \n");
+    printf(CYAN"| |__| |_   _ _  ___   ___  __ _ _ __   __| | \\  / | __ _| |_ ___  ___ _ __  ___ \n");
+    printf(CYAN"|  __  | | | | |/ _ \\ / _ \\/ _` | '_ \\ / _` | |\\/| |/ _` | __/ _ \\/ _ \\ '_ \\/ __|\n");
+    printf(CYAN"| |  | | |_| | | (_) |  __/ (_| | | | | (_| | |  | | (_| | ||  __/  __/ | | \\__ \\\n");
+    printf(CYAN"|_|  |_|\\__,_| |\\___/ \\___|\\__,_|_| |_|\\__,_|_|  |_|\\__,_|\\__\\___|\\___|_| |_|___/\n");
+    printf(CYAN"            _/ |\n");
+    printf(CYAN"           |__/\n");
+    printf("\n");
+    printf(RED "TinyFS Demo\n" RESET);
+    printf(CYAN "==========================================================================================\n" RESET);
+    printf("Timestamp: %02d:%02d:%02d\n\n", t->tm_hour, t->tm_min, t->tm_sec);
+    sleep(1);
+}
+
+// Helper function to print operation status
+void printStatus(const char *operation, int result) {
+    if(result == TFS_SUCCESS)
+        printf(GREEN "[SUCCESS] " RESET "%s\n", operation);
+    else
+        printf(RED "[ERROR %d] " RESET "%s\n", result, operation);
+    sleep(1);
+}
 
 int main() {
     int result;
     fileDescriptor fd;
     char diskName[] = "tinyFSDisk";
     // Specify disk size in bytes. (Ensure this is a multiple of BLOCKSIZE.)
-    int diskSize = 1024 * 10;  
+    int diskSize = 1024 * 10;
 
-    printf("=== TinyFS Demo ===\n");
+    printHeader();
+    printf(BLUE "Starting TinyFS operations demo...\n" RESET);
+    sleep(1);
 
     /* Basic Operations Demo */
-    printf("\n[Basic Demo] Creating a new file system on disk '%s' with size %d bytes...\n",
+    printf(YELLOW "\n[Basic Demo] Creating a new file system on disk '%s' with size %d bytes...\n" RESET,
            diskName, diskSize);
     result = tfs_mkfs(diskName, diskSize);
-    if (result != TFS_SUCCESS) {
-        printf("Error creating file system: %d\n", result);
-        return 1;
-    }
+    printStatus("Creating file system", result);
+    if (result != TFS_SUCCESS) return 1;
 
-    printf("\nMounting the file system...\n");
+    printf(YELLOW "\nMounting the file system...\n" RESET);
     result = tfs_mount(diskName);
-    if (result != TFS_SUCCESS) {
-        printf("Error mounting file system: %d\n", result);
-        return 1;
-    }
+    printStatus("Mounting file system", result);
+    if (result != TFS_SUCCESS) return 1;
 
-    printf("\nOpening file 'testfile'...\n");
+    printf(YELLOW "\nOpening file 'testfile'...\n" RESET);
     fd = tfs_openFile("testfile");
     if (fd < 0) {
-        printf("Error opening file: %d\n", fd);
+        printStatus("Opening file 'testfile'", fd);
         return 1;
+    } else {
+        printStatus("Opening file 'testfile'", TFS_SUCCESS);
     }
 
     char data[] = "Hello, TinyFS!";
-    printf("\nWriting to file 'testfile': \"%s\"\n", data);
+    printf(YELLOW "\nWriting to file 'testfile': \"%s\"\n" RESET, data);
     result = tfs_writeFile(fd, data, strlen(data));
-    if (result != TFS_SUCCESS) {
-        printf("Error writing file: %d\n", result);
-        return 1;
-    }
+    printStatus("Writing data to 'testfile'", result);
+    if (result != TFS_SUCCESS) return 1;
 
-    printf("\nReading file info for 'testfile':\n");
+    printf(YELLOW "\nReading file info for 'testfile':\n" RESET);
     result = tfs_readFileInfo(fd);
-    if (result != TFS_SUCCESS) {
-        printf("Error reading file info: %d\n", result);
-        return 1;
-    }
+    printStatus("Reading file info", result);
+    if (result != TFS_SUCCESS) return 1;
 
     int offset = 7;
     char newByte = 'X';
-    printf("\nWriting a single byte '%c' at offset %d in 'testfile'...\n", newByte, offset);
+    printf(YELLOW "\nOverwriting a single byte '%c' at offset %d in 'testfile'...\n" RESET, newByte, offset);
     result = tfs_writeByte(fd, offset, (unsigned int)newByte);
-    if (result != TFS_SUCCESS) {
-        printf("Error writing byte: %d\n", result);
-        return 1;
-    }
+    printStatus("Overwriting byte", result);
+    if (result != TFS_SUCCESS) return 1;
 
-    printf("\nReading file 'testfile' byte-by-byte:\n");
+    printf(YELLOW "\nReading file 'testfile' byte-by-byte:\n" RESET);
     result = tfs_seek(fd, 0);
     if (result != TFS_SUCCESS) {
-        printf("Error seeking in file: %d\n", result);
+        printStatus("Seeking to beginning", result);
         return 1;
     }
     int i, fileSize = strlen(data);
@@ -82,175 +114,170 @@ int main() {
         char ch;
         result = tfs_readByte(fd, &ch);
         if (result != TFS_SUCCESS) {
-            printf("Error reading byte at position %d: %d\n", i, result);
+            printf(RED "Error reading byte at position %d: %d\n" RESET, i, result);
             break;
         }
         printf("%c", ch);
+        fflush(stdout);
+        usleep(150000);  // short delay for a cool typewriter effect
     }
     printf("\n");
 
-    printf("\nRenaming file 'testfile' to 'newname'...\n");
+    printf(YELLOW "\nRenaming file 'testfile' to 'newname'...\n" RESET);
     result = tfs_rename(fd, "newname");
-    if (result != TFS_SUCCESS) {
-        printf("Error renaming file: %d\n", result);
-    }
+    printStatus("Renaming file", result);
 
-    printf("\nDirectory Listing:\n");
+    printf(YELLOW "\nDirectory Listing:\n" RESET);
     result = tfs_readdir();
-    if (result != TFS_SUCCESS) {
-        printf("Error listing directory: %d\n", result);
-    }
+    printStatus("Directory Listing", result);
 
-    printf("\nSetting file 'newname' to read-only...\n");
+    printf(YELLOW "\nSetting file 'newname' to read-only...\n" RESET);
     result = tfs_makeRO("newname");
-    if (result != TFS_SUCCESS) {
-        printf("Error setting file to read-only: %d\n", result);
-    }
+    printStatus("Setting read-only", result);
 
-    printf("\nAttempting to write to read-only file 'newname' (this should fail)...\n");
+    printf(YELLOW "\nAttempting to write to read-only file 'newname' (should fail)...\n" RESET);
     result = tfs_writeFile(fd, "Another text", strlen("Another text"));
-    if (result == TFS_SUCCESS) {
-        printf("Unexpectedly succeeded in writing to a read-only file.\n");
-    } else {
-        printf("Correctly failed to write to a read-only file.\n");
-    }
+    if (result == TFS_SUCCESS)
+        printf(RED "Unexpectedly succeeded in writing to a read-only file.\n" RESET);
+    else
+        printf(GREEN "Correctly failed to write to a read-only file.\n" RESET);
+    sleep(1);
 
-    printf("\nChanging file 'newname' to read-write...\n");
+    printf(YELLOW "\nChanging file 'newname' to read-write...\n" RESET);
     result = tfs_makeRW("newname");
-    if (result != TFS_SUCCESS) {
-        printf("Error setting file to read-write: %d\n", result);
-    }
+    printStatus("Changing to read-write", result);
 
-    printf("\nWriting new content to 'newname'...\n");
+    printf(YELLOW "\nWriting new content to 'newname'...\n" RESET);
     result = tfs_writeFile(fd, "New Content", strlen("New Content"));
-    if (result != TFS_SUCCESS) {
-        printf("Error writing new content: %d\n", result);
-    }
+    printStatus("Writing new content", result);
 
-    printf("\nUnmounting the file system...\n");
+    printf(YELLOW "\nUnmounting the file system...\n" RESET);
     result = tfs_unmount();
-    if (result != TFS_SUCCESS) {
-        printf("Error unmounting file system: %d\n", result);
-        return 1;
-    }
+    printStatus("Unmounting file system", result);
+    if (result != TFS_SUCCESS) return 1;
 
-    printf("\nTinyFS basic demo completed successfully.\n");
+    printf(MAGENTA "\nTinyFS basic demo completed successfully!\n" RESET);
+    sleep(2);
 
     /* =========== EDGE CASE TESTS =========== */
-    printf("\n=== EDGE CASE TESTS ===\n");
+    printf(CYAN "\n============================================\n" RESET);
+    printf(CYAN "            EDGE CASE TESTS\n" RESET);
+    printf(CYAN "============================================\n\n" RESET);
+    sleep(1);
 
     /* Edge Case 1: Create FS with a size not a multiple of BLOCKSIZE */
-    printf("\n[Edge Case 1] Creating FS with size not a multiple of BLOCKSIZE...\n");
+    printf(YELLOW "[Edge Case 1] Creating FS with size not a multiple of BLOCKSIZE...\n" RESET);
     result = tfs_mkfs("edge_nonmultiple.bin", BLOCKSIZE + 1);
     if (result == TFS_SUCCESS)
-        printf("Unexpectedly succeeded in creating FS with non-multiple BLOCKSIZE size.\n");
+        printf(RED "Unexpectedly succeeded in creating FS with non-multiple BLOCKSIZE size.\n" RESET);
     else
-        printf("Correctly failed to create FS with non-multiple BLOCKSIZE size. Error: %d\n", result);
+        printf(GREEN "Correctly failed to create FS with non-multiple BLOCKSIZE size. Error: %d\n" RESET, result);
+    sleep(1);
 
     /* Edge Case 2: Create FS with size zero */
-    printf("\n[Edge Case 2] Creating FS with zero size...\n");
+    printf(YELLOW "\n[Edge Case 2] Creating FS with zero size...\n" RESET);
     result = tfs_mkfs("edge_zero.bin", 0);
     if (result == TFS_SUCCESS)
-        printf("Unexpectedly succeeded in creating FS with zero size.\n");
+        printf(RED "Unexpectedly succeeded in creating FS with zero size.\n" RESET);
     else
-        printf("Correctly failed to create FS with zero size. Error: %d\n", result);
+        printf(GREEN "Correctly failed to create FS with zero size. Error: %d\n" RESET, result);
+    sleep(1);
 
     /* Edge Case 3: Open a file with a name longer than 8 characters */
-    printf("\n[Edge Case 3] Opening file with a name longer than 8 characters...\n");
+    printf(YELLOW "\n[Edge Case 3] Opening file with a name longer than 8 characters...\n" RESET);
     result = tfs_openFile("TooLongFileName");
     if (result >= 0)
-        printf("Unexpectedly succeeded in opening a file with a too long name.\n");
+        printf(RED "Unexpectedly succeeded in opening a file with a too long name.\n" RESET);
     else
-        printf("Correctly failed to open file with a too long name. Error: %d\n", result);
+        printf(GREEN "Correctly failed to open file with a too long name. Error: %d\n" RESET, result);
+    sleep(1);
 
-    /* 
-       For Edge Cases 4, 5, and 6 we need a mounted filesystem.
+    /* For Edge Cases 4, 5, and 6 we need a mounted filesystem.
        Remount the default filesystem before continuing.
     */
-    printf("\n[Edge Cases Setup] Remounting filesystem '%s' for further tests...\n", diskName);
+    printf(YELLOW "\n[Edge Cases Setup] Remounting filesystem '%s' for further tests...\n" RESET, diskName);
     result = tfs_mount(diskName);
-    if (result != TFS_SUCCESS) {
-        printf("Error mounting FS for edge cases: %d\n", result);
-        return 1;
-    }
+    printStatus("Remounting filesystem", result);
+    if (result != TFS_SUCCESS) return 1;
 
     /* Edge Case 4: Writing to a closed file */
-    printf("\n[Edge Case 4] Writing to a closed file...\n");
+    printf(YELLOW "\n[Edge Case 4] Writing to a closed file...\n" RESET);
     fd = tfs_openFile("tempfile");
     if (fd < 0) {
-        printf("Error opening 'tempfile': %d\n", fd);
+        printf(RED "Error opening 'tempfile': %d\n" RESET, fd);
     } else {
         result = tfs_closeFile(fd);
-        if (result != TFS_SUCCESS) {
-            printf("Error closing 'tempfile': %d\n", result);
-        }
+        printStatus("Closing 'tempfile'", result);
         result = tfs_writeFile(fd, "Data", strlen("Data"));
         if (result == TFS_SUCCESS)
-            printf("Unexpectedly succeeded in writing to a closed file.\n");
+            printf(RED "Unexpectedly succeeded in writing to a closed file.\n" RESET);
         else
-            printf("Correctly failed to write to a closed file. Error: %d\n", result);
+            printf(GREEN "Correctly failed to write to a closed file. Error: %d\n" RESET, result);
     }
+    sleep(1);
 
     /* Edge Case 5: Seeking beyond the end of a file */
-    printf("\n[Edge Case 5] Seeking beyond the end of a file...\n");
+    printf(YELLOW "\n[Edge Case 5] Seeking beyond the end of a file...\n" RESET);
     fd = tfs_openFile("seekTest");
     if (fd < 0) {
-        printf("Error opening 'seekTest': %d\n", fd);
+        printf(RED "Error opening 'seekTest': %d\n" RESET, fd);
     } else {
         result = tfs_writeFile(fd, "Short", strlen("Short"));
         if (result != TFS_SUCCESS) {
-            printf("Error writing to 'seekTest': %d\n", result);
+            printf(RED "Error writing to 'seekTest': %d\n" RESET, result);
         } else {
             result = tfs_seek(fd, 1000);  // far beyond file size
             if (result == TFS_SUCCESS)
-                printf("Unexpectedly succeeded in seeking beyond file end.\n");
+                printf(RED "Unexpectedly succeeded in seeking beyond file end.\n" RESET);
             else
-                printf("Correctly failed to seek beyond file end. Error: %d\n", result);
+                printf(GREEN "Correctly failed to seek beyond file end. Error: %d\n" RESET, result);
         }
     }
+    sleep(1);
 
     /* Edge Case 6: Writing a byte outside the file's range */
-    printf("\n[Edge Case 6] Writing a byte at an invalid offset...\n");
+    printf(YELLOW "\n[Edge Case 6] Writing a byte at an invalid offset...\n" RESET);
     fd = tfs_openFile("byteTest");
     if (fd < 0) {
-        printf("Error opening 'byteTest': %d\n", fd);
+        printf(RED "Error opening 'byteTest': %d\n" RESET, fd);
     } else {
         result = tfs_writeFile(fd, "12345", 5);
         if (result != TFS_SUCCESS) {
-            printf("Error writing to 'byteTest': %d\n", result);
+            printf(RED "Error writing to 'byteTest': %d\n" RESET, result);
         } else {
             // Attempt to write a byte at offset equal to file size (invalid)
             result = tfs_writeByte(fd, 5, 'Z');
             if (result == TFS_SUCCESS)
-                printf("Unexpectedly succeeded in writing a byte out-of-range.\n");
+                printf(RED "Unexpectedly succeeded in writing a byte out-of-range.\n" RESET);
             else
-                printf("Correctly failed to write a byte out-of-range. Error: %d\n", result);
+                printf(GREEN "Correctly failed to write a byte out-of-range. Error: %d\n" RESET, result);
         }
     }
+    sleep(1);
 
     /* Edge Case 7: Mounting a non-existent filesystem */
-    printf("\n[Edge Case 7] Mounting a non-existent filesystem...\n");
+    printf(YELLOW "\n[Edge Case 7] Mounting a non-existent filesystem...\n" RESET);
     result = tfs_mount("nonexistent.bin");
     if (result == TFS_SUCCESS)
-        printf("Unexpectedly succeeded in mounting a non-existent filesystem.\n");
+        printf(RED "Unexpectedly succeeded in mounting a non-existent filesystem.\n" RESET);
     else
-        printf("Correctly failed to mount a non-existent filesystem. Error: %d\n", result);
+        printf(GREEN "Correctly failed to mount a non-existent filesystem. Error: %d\n" RESET, result);
+    sleep(1);
 
     /* Edge Case 8: Unmounting when no filesystem is mounted */
-printf("\n[Edge Case 8] Unmounting when no filesystem is mounted...\n");
-// First, unmount the filesystem (this should succeed)
-result = tfs_unmount();
-if (result != TFS_SUCCESS) {
-    printf("Error unmounting FS for edge case 8: %d\n", result);
-} else {
-    // Now, try to unmount again (with no FS mounted)
+    printf(YELLOW "\n[Edge Case 8] Unmounting when no filesystem is mounted...\n" RESET);
     result = tfs_unmount();
-    if (result == TFS_SUCCESS)
-        printf("Unexpectedly succeeded in unmounting when nothing is mounted.\n");
-    else
-        printf("Correctly failed to unmount when nothing is mounted. Error: %d\n", result);
-}
+    if (result != TFS_SUCCESS) {
+        printf(RED "Error unmounting FS for edge case 8: %d\n" RESET, result);
+    } else {
+        result = tfs_unmount();
+        if (result == TFS_SUCCESS)
+            printf(RED "Unexpectedly succeeded in unmounting when nothing is mounted.\n" RESET);
+        else
+            printf(GREEN "Correctly failed to unmount when nothing is mounted. Error: %d\n" RESET, result);
+    }
+    sleep(1);
 
-
+    printf(MAGENTA "\nTinyFS demo (including edge cases) completed. Goodbye!\n" RESET);
     return 0;
 }
