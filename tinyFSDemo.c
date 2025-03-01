@@ -38,7 +38,7 @@ void printHeader() {
     printf(CYAN"            _/ |\n");
     printf(CYAN"           |__/\n");
     printf("\n");
-    printf(RED "TinyFS Demo\n" RESET);
+    printf(RED " TinyFS Demo\n" RESET);
     printf(CYAN "==========================================================================================\n" RESET);
     printf("Timestamp: %02d:%02d:%02d\n\n", t->tm_hour, t->tm_min, t->tm_sec);
     sleep(1);
