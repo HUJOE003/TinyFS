@@ -12,7 +12,13 @@ int tfs_writeFile(fileDescriptor FD, char *buffer, int size);
 int tfs_deleteFile(fileDescriptor FD);
 int tfs_readByte(fileDescriptor FD, char *buffer);
 int tfs_seek(fileDescriptor FD, int offset);
-
+//new ones
+int tfs_readFileInfo(fileDescriptor FD);
+int tfs_writeByte(fileDescriptor FD, int offset, unsigned int newByte);
+int tfs_rename(fileDescriptor FD, char *newname);
+int tfs_readdir(void);
+int tfs_makeRO(char *filename);
+int tfs_makeRW(char *filename);
 /*
 Block Structures:
 
@@ -28,6 +34,10 @@ Inode block:
 – Bytes 4–11: file name (up to 8 characters)
 – Bytes 12–15: file size (stored as 4 bytes)
 – Bytes 16-19: pointer to the first data block (0 if none)
+- Bytes 20–23: creation timestamp (4 bytes)
+- Bytes 24–27: modification timestamp (4 bytes)
+- Bytes 28–31: access timestamp (4 bytes)
+- Byte 32: read-only flag (0 = read-write, 1 = read-only)
 
 Data (file extent) block:
 – Byte 0: type (3)
