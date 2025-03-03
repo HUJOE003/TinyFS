@@ -57,10 +57,22 @@
 #endif
 
 #define MAX_OPEN_FILES 20
+#define MAX_INODES 1024
 
 //-------------------------------------------------------------
 /*                   Core Features                           */
 //-------------------------------------------------------------
+
+typedef struct {
+    char name[9];       // 8-character filename (null-terminated)
+    int inodeIndex;     // The inode block number
+    int firstDataBlock; // The file's first data block (from inode)
+    int r, g, b;        // Persistent color (stored in the inode as well)
+} InodeColor;
+
+static InodeColor inodeColors[MAX_INODES];
+static int inodeCount = 0;
+
 
 // Open file table entry
 typedef struct OpenFile {
@@ -74,6 +86,12 @@ static OpenFile openFileTable[MAX_OPEN_FILES];
 static int mountedDisk = -1;
 static int totalBlocks = 0;
 static int isMounted = -1;  // will be set to 1 when mounted
+
+unsigned int get_seed() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned int)(ts.tv_nsec);  // Use nanoseconds for more randomness
+}
 
 // Helper functions to convert int to bytes (big-endian)
 static void intToBytes(int value, char *dest) {
@@ -151,6 +169,66 @@ static int getFreeBlockCount(){
         if(block[0] == 4) freeBlockCount++;
     }
     return freeBlockCount;
+}
+
+// Generate random RGB colors
+void generateRandomColor(int *r, int *g, int *b) {
+    srand(get_seed());
+    *r = rand() % 256;
+    *g = rand() % 256;
+    *b = rand() % 256;
+}
+
+// Add a mapping entry if one for this inode does not already exist.
+void addMapping(int inodeBlock, char *name, int firstDataBlock, int r, int g, int b) {
+    // Check if already exists.
+    int i;
+    for (i = 0; i < inodeCount; i++) {
+        if (inodeColors[i].inodeIndex == inodeBlock) {
+            return; // already exists, do nothing.
+        }
+    }
+    if (inodeCount < MAX_INODES) {
+        strncpy(inodeColors[inodeCount].name, name, 8);
+        inodeColors[inodeCount].name[8] = '\0';
+        inodeColors[inodeCount].inodeIndex = inodeBlock;
+        inodeColors[inodeCount].firstDataBlock = firstDataBlock;
+        inodeColors[inodeCount].r = r;
+        inodeColors[inodeCount].g = g;
+        inodeColors[inodeCount].b = b;
+        inodeCount++;
+    }
+}
+
+// Remove a mapping entry by inode block number.
+void removeMapping(int inodeBlock) {
+    int i;
+    for (i = 0; i < inodeCount; i++) {
+        if (inodeColors[i].inodeIndex == inodeBlock) {
+            int j;
+            for (j = i; j < inodeCount - 1; j++) {
+                inodeColors[j] = inodeColors[j + 1];
+            }
+            inodeCount--;
+            return;
+        }
+    }
+}
+
+// Given a data block number, determine the owning file by checking each mapping's chain.
+InodeColor *getOwnerForDataBlock(int dataBlock) {
+    if (dataBlock == 0) return NULL;
+    int i;
+    char tempBlock[BLOCKSIZE];
+    for (i = 0; i < inodeCount; i++) {
+        int current = inodeColors[i].firstDataBlock;
+        while (current != 0) {
+            if (current == dataBlock) return &inodeColors[i];
+            if (readBlock(mountedDisk, current, tempBlock) < 0) break;
+            current = bytesToInt(tempBlock + 4);
+        }
+    }
+    return NULL;
 }
 
 /* tfs_mkfs:
@@ -237,7 +315,6 @@ int tfs_unmount(void){
 */
 fileDescriptor tfs_openFile(char *name) {
     if (mountedDisk < 0) return TFS_ERR_OPEN;
-
     if (strlen(name) > 8) return TFS_ERR_OPEN;
 
     int nameLength = strlen(name);
@@ -248,41 +325,53 @@ fileDescriptor tfs_openFile(char *name) {
     char block[BLOCKSIZE];
     int inodeBlockLocation = -1;
     int i;
-    for(i = 0; i < totalBlocks; i++){
+    // Search disk for an inode with matching name.
+    for (i = 0; i < totalBlocks; i++){
         if (readBlock(mountedDisk, i, block) < 0) continue;
-        if (block[0] == 2 && block[1] == 0x44){
-            if (strncmp(block+4, inodeName, 8) == 0){
+        if (block[0] == 2 && block[1] == 0x44) {
+            if (strncmp(block + 4, inodeName, 8) == 0) {
                 inodeBlockLocation = i;
                 break;
             }
         }
     }
-
-    if (inodeBlockLocation < 0){
+    if (inodeBlockLocation < 0) {
+        // File doesn't exist, create a new inode.
         inodeBlockLocation = getFreeBlock();
         if (inodeBlockLocation < 0) return TFS_ERR_OPEN;
 
         memset(block, 0, BLOCKSIZE);
-        block[0] = 2;
-        block[1] = 0x44;
-        memcpy(block+4, inodeName, 8);
-        intToBytes(0, block+12);
-        intToBytes(0, block+16);
+        block[0] = 2;        // inode block type
+        block[1] = 0x44;     // magic number
+        memcpy(block + 4, inodeName, 8);
+        intToBytes(0, block + 12); // file size = 0
+        intToBytes(0, block + 16); // no data block yet
 
+        // Set timestamps (creation, modification, access)
         int timestamp = (int)time(NULL);
-        intToBytes(timestamp, block+20);
-        intToBytes(timestamp, block+24);
-        intToBytes(timestamp, block+28);
+        intToBytes(timestamp, block + 20);
+        intToBytes(timestamp, block + 24);
+        intToBytes(timestamp, block + 28);
+        block[32] = 0;       // read-write flag
 
-        block[32] = 0; // read-write
+        // Generate a random color and store it in bytes 33-35.
+        int r, g, b;
+        generateRandomColor(&r, &g, &b);
+        block[33] = (char)r;
+        block[34] = (char)g;
+        block[35] = (char)b;
 
         if (writeBlock(mountedDisk, inodeBlockLocation, block) < 0)
             return TFS_ERR_OPEN;
+
+        // Add one mapping entry.
+        addMapping(inodeBlockLocation, inodeName, 0, r, g, b);
     }
 
+    // Insert into open file table.
     int fd = -1;
-    for(i = 0; i < MAX_OPEN_FILES; i++){
-        if(!openFileTable[i].used){
+    for (i = 0; i < MAX_OPEN_FILES; i++) {
+        if (!openFileTable[i].used) {
             fd = i;
             openFileTable[i].used = 1;
             openFileTable[i].inodeBlock = inodeBlockLocation;
@@ -290,7 +379,6 @@ fileDescriptor tfs_openFile(char *name) {
             break;
         }
     }
-
     if (fd < 0) return TFS_ERR_OPEN;
     return fd;
 }
@@ -317,89 +405,119 @@ void freeAllocatedBlocks(int allocatedBlocks[], int length){
    - Returns TFS_SUCCESS on success or TFS_ERR_WRITE on failure.
 */
 int tfs_writeFile(fileDescriptor FD, char *buffer, int size) {
-    if (FD < 0 || FD >= MAX_OPEN_FILES || !openFileTable[FD].used) return TFS_ERR_WRITE;
+    if (FD < 0 || FD >= MAX_OPEN_FILES || !openFileTable[FD].used)
+         return TFS_ERR_WRITE;
 
     int inodeBlockLocation = openFileTable[FD].inodeBlock;
     char inodeBlock[BLOCKSIZE];
-    if (readBlock(mountedDisk, inodeBlockLocation, inodeBlock) < 0) return TFS_ERR_WRITE;
+    if (readBlock(mountedDisk, inodeBlockLocation, inodeBlock) < 0)
+         return TFS_ERR_WRITE;
 
-    if (inodeBlock[32] == 1) return TFS_ERR_WRITE;
+    if (inodeBlock[32] == 1) return TFS_ERR_WRITE;  // read-only
 
-    int dataBlockLocation = bytesToInt(inodeBlock+16);
+    // Free old data blocks.
+    int dataBlockLocation = bytesToInt(inodeBlock + 16);
     char dataBlock[BLOCKSIZE];
-    while (dataBlockLocation != 0){
-        if (readBlock(mountedDisk, dataBlockLocation, dataBlock) < 0) break;
-        int next = bytesToInt(dataBlock+4);
-        addFreeBlock(dataBlockLocation);
-        dataBlockLocation = next;
+    while (dataBlockLocation != 0) {
+         if (readBlock(mountedDisk, dataBlockLocation, dataBlock) < 0)
+             break;
+         int next = bytesToInt(dataBlock + 4);
+         addFreeBlock(dataBlockLocation);
+         dataBlockLocation = next;
     }
 
     if (size == 0) {
-        intToBytes(0, inodeBlock+12);
-        intToBytes(0, inodeBlock+16);
-        intToBytes((int)time(NULL), inodeBlock+24);
+        intToBytes(0, inodeBlock + 12);
+        intToBytes(0, inodeBlock + 16);
+        intToBytes((int)time(NULL), inodeBlock + 24);
         writeBlock(mountedDisk, inodeBlockLocation, inodeBlock);
         openFileTable[FD].filePointer = 0;
+        int i;
+        for (i = 0; i < inodeCount; i++) {
+            if (inodeColors[i].inodeIndex == inodeBlockLocation) {
+                inodeColors[i].firstDataBlock = 0;
+                break;
+            }
+        }
         return TFS_SUCCESS;
     }
 
     int bytesPerBlock = BLOCKSIZE - 8;
     int blocksNeeded = (size + bytesPerBlock - 1) / bytesPerBlock;
     int availableFreeBlocks = getFreeBlockCount();
-
     if (blocksNeeded > availableFreeBlocks) return TFS_ERR_WRITE;
 
     int firstDataBlockLocation = 0;
     int prevBlock = 0;
     int allocatedBlocks[blocksNeeded];
     int allocatedCount = 0;
-    
     int i;
-    for(i = 0; i < blocksNeeded; i++){
+    for (i = 0; i < blocksNeeded; i++) {
         int currentBlock = getFreeBlock();
-        if (currentBlock < 0){
+        if (currentBlock < 0) {
             freeAllocatedBlocks(allocatedBlocks, allocatedCount);
             return TFS_ERR_WRITE;
         }
         allocatedBlocks[allocatedCount++] = currentBlock;
 
         memset(dataBlock, 0, BLOCKSIZE);
-        dataBlock[0] = 3;
-        dataBlock[1] = 0x44;
-        intToBytes(0, dataBlock+4);
+        dataBlock[0] = 3;      // data block type
+        dataBlock[1] = 0x44;   // magic number
+        intToBytes(0, dataBlock + 4); // next pointer initially 0
 
-        int bufferStartingPosition = i * bytesPerBlock;
-        int numBytesToWrite = (size - bufferStartingPosition < bytesPerBlock) ? (size - bufferStartingPosition) : bytesPerBlock;
-        memcpy(dataBlock+8, buffer+bufferStartingPosition, numBytesToWrite);
+        int bufferPos = i * bytesPerBlock;
+        int numBytesToWrite = (size - bufferPos < bytesPerBlock) ? (size - bufferPos) : bytesPerBlock;
+        memcpy(dataBlock + 8, buffer + bufferPos, numBytesToWrite);
 
-        if (writeBlock(mountedDisk, currentBlock, dataBlock) < 0){
+        if (writeBlock(mountedDisk, currentBlock, dataBlock) < 0) {
             freeAllocatedBlocks(allocatedBlocks, allocatedCount);
             return TFS_ERR_WRITE;
         }
 
-        if (firstDataBlockLocation == 0) firstDataBlockLocation = currentBlock;
+        if (firstDataBlockLocation == 0)
+            firstDataBlockLocation = currentBlock;
 
-        if (prevBlock != 0){
-            if (readBlock(mountedDisk, prevBlock, dataBlock) < 0) return TFS_ERR_WRITE;
-            intToBytes(currentBlock, dataBlock+4);
-            if (writeBlock(mountedDisk, prevBlock, dataBlock) < 0) {
-                freeAllocatedBlocks(allocatedBlocks, allocatedCount);
+        if (prevBlock != 0) {
+            if (readBlock(mountedDisk, prevBlock, dataBlock) < 0)
                 return TFS_ERR_WRITE;
-            }
+            intToBytes(currentBlock, dataBlock + 4);
+            if (writeBlock(mountedDisk, prevBlock, dataBlock) < 0)
+                return TFS_ERR_WRITE;
         }
         prevBlock = currentBlock;
     }
 
-    intToBytes(size, inodeBlock+12);
-    intToBytes(firstDataBlockLocation, inodeBlock+16);
-    intToBytes((int)time(NULL), inodeBlock+24);
+    intToBytes(size, inodeBlock + 12);
+    intToBytes(firstDataBlockLocation, inodeBlock + 16);
+    intToBytes((int)time(NULL), inodeBlock + 24);
     if (writeBlock(mountedDisk, inodeBlockLocation, inodeBlock) < 0)
-        return TFS_ERR_WRITE;
+         return TFS_ERR_WRITE;
 
     openFileTable[FD].filePointer = 0;
+
+    for (i = 0; i < inodeCount; i++) {
+        if (inodeColors[i].inodeIndex == inodeBlockLocation) {
+            inodeColors[i].firstDataBlock = firstDataBlockLocation;
+            break;
+        }
+    }
+
     return TFS_SUCCESS;
 }
 
+void removeInodeColorByIndex(int inodeIndex) {
+    int i;
+    for (i = 0; i < inodeCount; i++) {
+        if (inodeColors[i].inodeIndex == inodeIndex) {
+            int j;
+            for (j = i; j < inodeCount - 1; j++) {
+                inodeColors[j] = inodeColors[j + 1];
+            }
+            inodeCount--;
+            return;
+        }
+    }
+}
 /* tfs_deleteFile:
    - Deletes a file (failing if it is read-only).
 */
@@ -412,6 +530,8 @@ int tfs_deleteFile(fileDescriptor FD) {
         return TFS_ERR_DELETE;
 
     if (inodeBlock[32] == 1) return TFS_ERR_DELETE;
+
+    removeInodeColorByIndex(inodeBlockLocation);
 
     int dataBlockLocation = bytesToInt(inodeBlock+16);
     char dataBlock[BLOCKSIZE];
@@ -669,4 +789,118 @@ int tfs_readdir(void) {
     if (!found)
         printf("  (No files found)\n");
     return TFS_SUCCESS;
+}
+
+void tfs_displayFragments() {
+    if (mountedDisk < 0) {
+        printf("No filesystem mounted.\n");
+        return;
+    }
+
+    char block[BLOCKSIZE];
+    int i;
+    printf("--- File Color Mapping ---\n");
+    for (i = 0; i < inodeCount; i++) {
+        printf("  \033[1;38;2;%d;%d;%dm%s\033[0m\n", 
+               inodeColors[i].r, inodeColors[i].g, inodeColors[i].b, inodeColors[i].name);
+    }
+
+    printf("\n--- Disk Fragmentation Map ---\n");
+    for (i = 0; i < totalBlocks; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) continue;
+        if (i == 0) {
+            printf("\033[1m[SUPERBLOCK]\033[0m ");
+        } else if (block[0] == 2) {  // Inode block
+            InodeColor *color = NULL;
+            int j;
+            for (j = 0; j < inodeCount; j++) {
+                if (inodeColors[j].inodeIndex == i) {
+                    color = &inodeColors[j];
+                    break;
+                }
+            }
+            if (color) {
+                printf("\033[3;38;2;%d;%d;%dm[INODE]\033[0m ", 
+                       color->r, color->g, color->b);
+            } else {
+                printf("\033[3m[UNKNOWN INODE]\033[0m ");
+            }
+        } else if (block[0] == 3) {  // Data block
+            InodeColor *owner = getOwnerForDataBlock(i);
+            if (owner) {
+                printf("\033[1;38;2;%d;%d;%dm[DATA]\033[0m ", 
+                       owner->r, owner->g, owner->b);
+            } else {
+                printf("\033[1;36m[DATA]\033[0m ");
+            }
+        } else if (block[0] == 4) {
+            printf("\033[1;31m[FREE]\033[0m ");
+        } else {
+            printf("\033[1;33m[UNKNOWN]\033[0m ");
+        }
+        if ((i + 1) % 10 == 0) printf("\n");
+    }
+    printf("\n");
+}
+
+void tfs_defrag() {
+    if (mountedDisk < 0) {
+        printf("No filesystem mounted.\n");
+        return;
+    }
+
+    char block[BLOCKSIZE];
+    int *mapping = malloc(totalBlocks * sizeof(int));
+    if (!mapping) return;
+    int i;
+    // Initialize mapping so that mapping[i] = i initially.
+    for (i = 0; i < totalBlocks; i++) {
+        mapping[i] = i;
+    }
+    int nextFreeIndex = 1;
+    // Move allocated blocks to the beginning (after superblock).
+    for (i = 1; i < totalBlocks; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) continue;
+        if (block[0] != 4) {  // if block is not free
+            if (i != nextFreeIndex) {
+                // Move block from i to nextFreeIndex.
+                writeBlock(mountedDisk, nextFreeIndex, block);
+                // Mark block i as free.
+                memset(block, 0, BLOCKSIZE);
+                block[0] = 4;
+                block[1] = 0x44;
+                int nextFree = (i == totalBlocks - 1) ? 0 : i + 1;
+                intToBytes(nextFree, block+4);
+                writeBlock(mountedDisk, i, block);
+                // Update mapping: block originally at i now resides at nextFreeIndex.
+                mapping[i] = nextFreeIndex;
+            }
+            nextFreeIndex++;
+        }
+    }
+    // Update chain pointers inside inode and data blocks.
+    for (i = 1; i < nextFreeIndex; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) continue;
+        if (block[0] == 2) { // inode block
+            int oldFirstData = bytesToInt(block+16);
+            int newFirstData = (oldFirstData == 0) ? 0 : mapping[oldFirstData];
+            intToBytes(newFirstData, block+16);
+            writeBlock(mountedDisk, i, block);
+        } else if (block[0] == 3) { // data block
+            int oldNext = bytesToInt(block+4);
+            int newNext = (oldNext == 0) ? 0 : mapping[oldNext];
+            intToBytes(newNext, block+4);
+            writeBlock(mountedDisk, i, block);
+        }
+    }
+    // Update global inodeColors table with new inode and first data block numbers.
+    for (i = 0; i < inodeCount; i++) {
+        int oldInode = inodeColors[i].inodeIndex;
+        inodeColors[i].inodeIndex = mapping[oldInode];
+        int oldData = inodeColors[i].firstDataBlock;
+        if (oldData != 0)
+            inodeColors[i].firstDataBlock = mapping[oldData];
+    }
+    free(mapping);
+    printf("Defragmentation complete.\n");
 }

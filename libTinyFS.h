@@ -19,6 +19,8 @@ int tfs_rename(fileDescriptor FD, char *newname);
 int tfs_readdir(void);
 int tfs_makeRO(char *filename);
 int tfs_makeRW(char *filename);
+void tfs_displayFragments();
+void tfs_defrag();
 /*
 Block Structures:
 
@@ -38,6 +40,7 @@ Inode block:
 - Bytes 24–27: modification timestamp (4 bytes)
 - Bytes 28–31: access timestamp (4 bytes)
 - Byte 32: read-only flag (0 = read-write, 1 = read-only)
+- Byte 33-35: r,g,b values
 
 Data (file extent) block:
 – Byte 0: type (3)
