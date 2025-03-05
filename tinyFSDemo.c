@@ -13,7 +13,9 @@
 #include <unistd.h> 
 
 #include "libTinyFS.h"
+ //include the disk library for manually corrupting our disk so the consistency checks will be insightful
 #include "libDisk.h"
+#include "tinyFS.h"
 #include "TinyFS_errno.h"
 
 #define RED     "\033[1;31m"

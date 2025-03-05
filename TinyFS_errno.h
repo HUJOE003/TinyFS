@@ -12,5 +12,10 @@
 #define TFS_ERR_READ    -8
 #define TFS_ERR_SEEK    -9
 #define TFS_ERR_DELETE -10
+#define TFS_ERR_READINFO -11
+#define TFS_ERR_MAKE_RO -12
+#define TFS_ERR_MAKE_RW -13
+#define TFS_ERR_RENAME -14
+#define TFS_ERR_READDIR -15
 
 #endif

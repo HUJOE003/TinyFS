@@ -19,6 +19,11 @@
  *   - Directory listing and file renaming:
  *       - tfs_rename
  *       - tfs_readdir
+ *   - Fragmentation:
+ *      - tfs_displayFragments
+ *      - tfs_defrag
+ *   - Consistency Checking:
+ *      - tfs_checkConsistency
  */
 
 #include <stdio.h>
@@ -28,34 +33,8 @@
 #include "libTinyFS.h"
 #include "TinyFS_errno.h"
 #include <time.h>
-static int checkConsistency(void);
+static int tfs_checkConsistency(void);
 
-/* 
-   Conditionally define error codes if not defined in TinyFS_errno.h.
-*/
-#ifndef TFS_ERR_MKFS
-#define TFS_ERR_MKFS -2
-#endif
-
-#ifndef TFS_ERR_READINFO
-#define TFS_ERR_READINFO -1
-#endif
-
-#ifndef TFS_ERR_MAKE_RO
-#define TFS_ERR_MAKE_RO -7
-#endif
-
-#ifndef TFS_ERR_MAKE_RW
-#define TFS_ERR_MAKE_RW -8
-#endif
-
-#ifndef TFS_ERR_RENAME
-#define TFS_ERR_RENAME -9
-#endif
-
-#ifndef TFS_ERR_READDIR
-#define TFS_ERR_READDIR -10
-#endif
 
 #define MAX_OPEN_FILES 20
 #define MAX_INODES 1024
@@ -290,7 +269,7 @@ int tfs_mount(char *diskname){
 
     totalBlocks = bytesToInt(superBlock+8);
     // Invoke consistency checks.
-    if(checkConsistency() != 0) {
+    if(tfs_checkConsistency() != 0) {
         closeDisk(mountedDisk);
         mountedDisk = -1;
         printf("Mount failed: File system inconsistency detected.\n");
@@ -912,10 +891,10 @@ void tfs_defrag() {
     free(mapping);
     printf("Defragmentation complete.\n");
 }
-/* checkConsistency()
+/* tfs_checkConsistency()
  * Returns 0 if the file system is consistent, or a negative error code otherwise.
  */
-static int checkConsistency(void) {
+static int tfs_checkConsistency(void) {
     int i;  // Declare the loop variable once for use in all loops.
     
     // Allocate arrays to track block status and inode references.
