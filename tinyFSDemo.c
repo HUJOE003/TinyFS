@@ -286,14 +286,85 @@ int main() {
     }
     sleep(1);
 
-/* Edge Case 9: Consistency Check Test */
-printf(YELLOW "\n[Edge Case 9] Mounting an inconsistent filesystem (simulate corruption)...\n" RESET);
-/* 
- * To simulate inconsistency, we open the disk directly using libDisk functions and 
- * modify a free block’s type. For example, we change the type from FREE (4) to INODE (2)
- * so that a block appears in both the free list and allocated.
- */
-{
+    /* Edge Case 9: Fragmentation/Defragmentation Test */
+    printf(YELLOW "\n[Edge Case 9] Fragmentation/Defragmentation Test\n" RESET);
+    {
+        char testDisk[] = "defragTestDisk";
+        const int testDiskSize = 20480; // 20KB Disk
+
+        printf(GREEN "Creating filesystem '%s' with size %d bytes...\n" RESET, testDisk, testDiskSize);
+        if (tfs_mkfs(testDisk, testDiskSize) != 0) {
+            printf(RED "Failed to create filesystem for defrag test.\n" RESET);
+        } else if (tfs_mount(testDisk) != 0) {
+            printf(RED "Failed to mount filesystem for defrag test.\n" RESET);
+        } else {
+            fileDescriptor fd1 = tfs_openFile("fileA");
+            fileDescriptor fd2 = tfs_openFile("fileB");
+            fileDescriptor fd3 = tfs_openFile("fileC");
+            fileDescriptor fd4 = tfs_openFile("fileD");
+            fileDescriptor fd5 = tfs_openFile("fileE");
+            fileDescriptor fd6 = tfs_openFile("fileF");
+            fileDescriptor fd7 = tfs_openFile("fileG");
+            fileDescriptor fd8 = tfs_openFile("fileH");
+            fileDescriptor fd9 = tfs_openFile("fileI");
+
+            if (fd1 < 0 || fd2 < 0 || fd3 < 0 || fd4 < 0) {
+                printf(RED "Error opening files for defrag test.\n" RESET);
+            } else {
+                char *dataA = "Data in file A spanning blocks.";
+                char *dataB = "File B content that takes multiple blocks.";
+                char *dataC = "File C with smaller content.";
+                char *dataD = "File D adding more data.";
+                char *dataE = "File D adding more data.";
+                char *dataF = "File D adding more data.";
+                char *dataG = "File D adding more data.";
+                char *dataH = "File D adding more data.";
+                char *dataI = "File D adding more data.";
+
+                tfs_writeFile(fd1, dataA, 30);
+                tfs_writeFile(fd2, dataB, 50);
+                tfs_writeFile(fd3, dataC, 20);
+                tfs_writeFile(fd4, dataD, 35);
+                tfs_writeFile(fd5, dataE, 35);
+                tfs_writeFile(fd6, dataF, 35);
+                tfs_writeFile(fd7, dataG, 35);
+                tfs_writeFile(fd8, dataH, 35);
+                tfs_writeFile(fd9, dataI, 35);
+
+                printf("\n--- Before Deleting ---\n");
+                tfs_displayFragments();
+
+                // Delete some files to create fragmentation
+                tfs_deleteFile(fd2);
+                tfs_deleteFile(fd3);
+
+                printf("\n--- Before Defragmentation ---\n");
+                tfs_displayFragments();
+
+                // Run defragmentation
+                printf("Running defragmentation...\n");
+                tfs_defrag();
+
+                // Display fragmentation after defrag
+                printf("\n--- After Defragmentation ---\n");
+                tfs_displayFragments();
+            }
+            tfs_unmount();
+            printf("Filesystem '%s' unmounted successfully after defrag test.\n", testDisk);
+            printf(GREEN "Correctly finished with the fragmentation/Defragmentation test case\n");
+        }
+    }
+    sleep(1);
+    
+
+    /* Edge Case 10: Consistency Check Test */
+    printf(YELLOW "\n[Edge Case 9] Mounting an inconsistent filesystem (simulate corruption)...\n" RESET);
+    /* 
+    * To simulate inconsistency, we open the disk directly using libDisk functions and 
+    * modify a free block’s type. For example, we change the type from FREE (4) to INODE (2)
+    * so that a block appears in both the free list and allocated.
+    */
+    {
     int disk;
     char block[BLOCKSIZE];
     disk = openDisk(diskName, 0);
@@ -325,14 +396,16 @@ printf(YELLOW "\n[Edge Case 9] Mounting an inconsistent filesystem (simulate cor
     }
 }
 
-/* Now attempt to mount the corrupted filesystem */
-result = tfs_mount(diskName);
-if (result == TFS_SUCCESS)
-    printf(RED "Unexpectedly succeeded in mounting an inconsistent filesystem.\n" RESET);
-else
-    printf(GREEN "Correctly failed to mount an inconsistent filesystem. Error: %d\n" RESET, result);
-sleep(1);
+    /* Now attempt to mount the corrupted filesystem */
+    result = tfs_mount(diskName);
+    if (result == TFS_SUCCESS)
+        printf(RED "Unexpectedly succeeded in mounting an inconsistent filesystem.\n" RESET);
+    else
+        printf(GREEN "Correctly failed to mount an inconsistent filesystem. Error: %d\n" RESET, result);
+    sleep(1);
 
-printf(MAGENTA "\nTinyFS demo (including edge cases) completed. Goodbye!\n" RESET);
+    printf(MAGENTA "\nTinyFS demo (including edge cases) completed. Goodbye!\n" RESET);
+
+
     return 0;
 }
