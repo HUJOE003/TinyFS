@@ -28,6 +28,7 @@
 #include "libTinyFS.h"
 #include "TinyFS_errno.h"
 #include <time.h>
+static int checkConsistency(void);
 
 /* 
    Conditionally define error codes if not defined in TinyFS_errno.h.
@@ -288,6 +289,13 @@ int tfs_mount(char *diskname){
     if(superBlock[0] != 1 || superBlock[1] != 0x44) return TFS_ERR_MOUNT;
 
     totalBlocks = bytesToInt(superBlock+8);
+    // Invoke consistency checks.
+    if(checkConsistency() != 0) {
+        closeDisk(mountedDisk);
+        mountedDisk = -1;
+        printf("Mount failed: File system inconsistency detected.\n");
+        return TFS_ERR_MOUNT;
+    }
     clearOpenFileTable();
     isMounted = 1;
     return TFS_SUCCESS;
@@ -903,4 +911,171 @@ void tfs_defrag() {
     }
     free(mapping);
     printf("Defragmentation complete.\n");
+}
+/* New function: checkConsistency()
+ * Returns 0 if the file system is consistent, or a negative error code otherwise.
+ */
+static int checkConsistency(void) {
+    int i;  // Declare the loop variable once for use in all loops.
+    
+    // Allocate arrays to track block status and inode references.
+    int *status = calloc(totalBlocks, sizeof(int));
+    int *referenced = calloc(totalBlocks, sizeof(int));
+    if (!status || !referenced) {
+        free(status);
+        free(referenced);
+        return -1;
+    }
+
+    char block[BLOCKSIZE];
+
+    // --- Check Superblock ---
+    if (readBlock(mountedDisk, 0, block) < 0) {
+        free(status); 
+        free(referenced);
+        return -1;
+    }
+    if (block[0] != 1 || block[1] != 0x44) {
+        printf("Superblock corrupted.\n");
+        free(status); 
+        free(referenced);
+        return -1;
+    }
+    status[0] = 1; // Superblock is allocated.
+
+    // --- Traverse the Free List ---
+    int freePtr = bytesToInt(block + 4); // starting free block pointer from superblock.
+    while (freePtr != 0) {
+        if (freePtr < 1 || freePtr >= totalBlocks) {
+            printf("Free list pointer out of range: %d\n", freePtr);
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        if (status[freePtr] != 0) {  // already marked allocated/free?
+            printf("Block %d appears multiple times in free list or conflicts with allocation.\n", freePtr);
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        if (readBlock(mountedDisk, freePtr, block) < 0) {
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        if (block[0] != 4 || block[1] != 0x44) {
+            printf("Block %d in free list is not a valid free block.\n", freePtr);
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        status[freePtr] = 2; // mark as free.
+        freePtr = bytesToInt(block + 4);
+    }
+
+    // --- Scan All Blocks ---
+    for (i = 1; i < totalBlocks; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) {
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        // Check the magic number for all blocks.
+        if (block[1] != 0x44) {
+            printf("Block %d has an invalid magic number.\n", i);
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        // If block type indicates a free block, then it should have been marked free by the free list.
+        if (block[0] == 4) {
+            if (status[i] != 2) {
+                printf("Block %d is free on disk but not found in the free list.\n", i);
+                free(status); 
+                free(referenced);
+                return -1;
+            }
+        } else if (block[0] == 2 || block[0] == 3) {
+            // For inode (2) and data (3) blocks, ensure they are not marked free.
+            if (status[i] == 2) {
+                printf("Block %d is allocated but also appears in the free list.\n", i);
+                free(status); 
+                free(referenced);
+                return -1;
+            }
+            status[i] = 1; // mark as allocated.
+        } else {
+            printf("Block %d has an unknown type: %d\n", i, block[0]);
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+    }
+
+    // --- Check Inode Chains ---
+    for (i = 0; i < totalBlocks; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) {
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        if (block[0] == 2) {  // inode block
+            int dataPtr = bytesToInt(block + 16);
+            while (dataPtr != 0) {
+                if (dataPtr < 1 || dataPtr >= totalBlocks) {
+                    printf("Inode at block %d references an invalid data block %d.\n", i, dataPtr);
+                    free(status); 
+                    free(referenced);
+                    return -1;
+                }
+                char dataBlock[BLOCKSIZE];
+                if (readBlock(mountedDisk, dataPtr, dataBlock) < 0) {
+                    free(status); 
+                    free(referenced);
+                    return -1;
+                }
+                if (dataBlock[0] != 3 || dataBlock[1] != 0x44) {
+                    printf("Inode at block %d references a corrupted data block %d.\n", i, dataPtr);
+                    free(status); 
+                    free(referenced);
+                    return -1;
+                }
+                if (referenced[dataPtr] != 0) {
+                    printf("Data block %d is referenced by multiple inodes.\n", dataPtr);
+                    free(status); 
+                    free(referenced);
+                    return -1;
+                }
+                referenced[dataPtr] = 1;
+                if (status[dataPtr] == 2) {
+                    printf("Data block %d is allocated in an inode but marked free.\n", dataPtr);
+                    free(status); 
+                    free(referenced);
+                    return -1;
+                }
+                dataPtr = bytesToInt(dataBlock + 4);
+            }
+        }
+    }
+
+    // --- Check for Orphan Data Blocks ---
+    for (i = 1; i < totalBlocks; i++) {
+        if (readBlock(mountedDisk, i, block) < 0) {
+            free(status); 
+            free(referenced);
+            return -1;
+        }
+        if (block[0] == 3) {  // data block
+            if (referenced[i] == 0) {
+                printf("Data block %d is allocated but not referenced by any inode.\n", i);
+                free(status); 
+                free(referenced);
+                return -1;
+            }
+        }
+    }
+
+    free(status);
+    free(referenced);
+    return 0;  // File system is consistent.
 }

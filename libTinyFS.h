@@ -21,6 +21,7 @@ int tfs_makeRO(char *filename);
 int tfs_makeRW(char *filename);
 void tfs_displayFragments();
 void tfs_defrag();
+// static int checkConsistency(void);
 /*
 Block Structures:
 

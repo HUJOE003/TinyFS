@@ -24,6 +24,12 @@
 #define CYAN    "\033[1;36m"
 #define RESET   "\033[0m"
 
+static int demoBytesToInt(const char *src) {
+    return ((unsigned char)src[0] << 24) |
+           ((unsigned char)src[1] << 16) |
+           ((unsigned char)src[2] << 8)  |
+           ((unsigned char)src[3]);
+}
 
 void printHeader() {
     time_t now = time(NULL);
@@ -278,6 +284,53 @@ int main() {
     }
     sleep(1);
 
-    printf(MAGENTA "\nTinyFS demo (including edge cases) completed. Goodbye!\n" RESET);
+/* Edge Case 9: Consistency Check Test */
+printf(YELLOW "\n[Edge Case 9] Mounting an inconsistent filesystem (simulate corruption)...\n" RESET);
+/* 
+ * To simulate inconsistency, we open the disk directly using libDisk functions and 
+ * modify a free block’s type. For example, we change the type from FREE (4) to INODE (2)
+ * so that a block appears in both the free list and allocated.
+ */
+{
+    int disk;
+    char block[BLOCKSIZE];
+    disk = openDisk(diskName, 0);
+    if (disk < 0) {
+        printf(RED "Failed to open disk for corruption simulation.\n" RESET);
+    } else {
+        /* Read the superblock to get the free list pointer */
+        if (readBlock(disk, 0, block) < 0) {
+            printf(RED "Failed to read superblock for corruption simulation.\n" RESET);
+        } else {
+            int freePtr = demoBytesToInt(block + 4);
+            if (freePtr > 0 && freePtr < diskSize / BLOCKSIZE) {
+                if (readBlock(disk, freePtr, block) < 0) {
+                    printf(RED "Failed to read free block for corruption simulation.\n" RESET);
+                } else {
+                    /* Simulate corruption by changing the block type */
+                    block[0] = 2;  // change from FREE (4) to INODE (2)
+                    if (writeBlock(disk, freePtr, block) < 0) {
+                        printf(RED "Failed to write corrupted block for consistency test.\n" RESET);
+                    } else {
+                        printf(GREEN "Simulated corruption: free block %d changed to inode type.\n" RESET, freePtr);
+                    }
+                }
+            } else {
+                printf(RED "No free block available for corruption simulation.\n" RESET);
+            }
+        }
+        closeDisk(disk);
+    }
+}
+
+/* Now attempt to mount the corrupted filesystem */
+result = tfs_mount(diskName);
+if (result == TFS_SUCCESS)
+    printf(RED "Unexpectedly succeeded in mounting an inconsistent filesystem.\n" RESET);
+else
+    printf(GREEN "Correctly failed to mount an inconsistent filesystem. Error: %d\n" RESET, result);
+sleep(1);
+
+printf(MAGENTA "\nTinyFS demo (including edge cases) completed. Goodbye!\n" RESET);
     return 0;
 }
