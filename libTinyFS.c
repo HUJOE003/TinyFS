@@ -912,7 +912,7 @@ void tfs_defrag() {
     free(mapping);
     printf("Defragmentation complete.\n");
 }
-/* New function: checkConsistency()
+/* checkConsistency()
  * Returns 0 if the file system is consistent, or a negative error code otherwise.
  */
 static int checkConsistency(void) {
