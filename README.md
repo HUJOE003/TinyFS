@@ -118,8 +118,6 @@ These extra modules extend TinyFS beyond basic requirements, demonstrating low-l
 * **Stress Scenarios:** Random file operations and concurrency tests.
 * **Benchmark:** <5% overhead compared to in-memory baseline for block I/O.
 
-Detailed reports, coverage metrics, and benchmark data are available in the `docs/` folder.
-
 ---
 
 ## 📌 Future Directions
