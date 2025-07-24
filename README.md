@@ -1,6 +1,6 @@
 # TinyFS: Advanced File System & Disk Emulator
 
-*by Hujoe Pandi Selvan and Mateen Shaagagi*
+*by Hujoe Pandi Selvan and Mateen Shagagi*
 
 ---
 
