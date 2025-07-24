@@ -18,6 +18,10 @@ TinyFS is a compact, high-performance file system built on a custom disk emulato
 * Reliability tools: on-disk consistency checks with customizable policies.
 
 ---
+## 📌 Demo
+<img width="463" height="689" alt="image" src="https://github.com/user-attachments/assets/55b304ac-002e-4bbd-8f42-6f5908b11da2" />
+<img width="482" height="711" alt="image" src="https://github.com/user-attachments/assets/6a59fba2-e1de-445f-b060-7cbd679645c9" />
+<img width="433" height="449" alt="image" src="https://github.com/user-attachments/assets/71f2a0bd-ae4c-4b7b-bcd7-f1c3809723fe" />
 
 ## 📂 Repository Layout
 
